@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#2B4BFF">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.json">
+<link rel="icon" href="icon.svg"><link rel="apple-touch-icon" href="icon.svg">
+<title>Montage IA</title>
+<style>
+:root{--bg:#EDF0F5;--ink:#101B33;--mut:#5B6784;--line:#C2CBDD;--acc:#2B4BFF;--on:#fff;--card:#fff}
+@media (prefers-color-scheme:dark){:root{--bg:#141B2E;--ink:#E8ECF6;--mut:#93A0BD;--line:#34405E;--acc:#6F89FF;--on:#0E1424;--card:#1B2440}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 ui-rounded,system-ui,-apple-system,sans-serif;padding:max(20px,env(safe-area-inset-top)) 20px max(28px,env(safe-area-inset-bottom));max-width:520px;margin-inline:auto}
+h1{font-size:2rem;line-height:1.1;margin:8px 0 20px;font-weight:800;letter-spacing:-.02em}
+.drop{display:grid;place-items:center;text-align:center;aspect-ratio:9/11;border:3px dashed var(--acc);border-radius:28px;background:var(--card);cursor:pointer;padding:24px}
+.drop b{font-size:1.4rem}.drop span{color:var(--mut);display:block;margin-top:6px}.drop.has{border-style:solid}
+input[type=file]{display:none}
+fieldset{border:0;padding:0;margin:22px 0 0}
+legend,.t{font-weight:700;margin-bottom:8px;display:block;padding:0}
+.seg{display:flex;gap:8px}.seg input{display:none}
+.seg label{flex:1;text-align:center;padding:12px;border:2px solid var(--line);border-radius:14px;font-weight:600;cursor:pointer;background:var(--card)}
+.seg input:checked+label{border-color:var(--acc);background:var(--acc);color:var(--on)}
+input[type=text]{width:100%;padding:13px 14px;border-radius:14px;border:2px solid var(--line);background:var(--card);color:var(--ink);font:inherit}
+.chk{display:flex;gap:10px;align-items:center;margin-top:22px;font-weight:600}.chk input{width:22px;height:22px;accent-color:var(--acc)}
+.pick{display:block;padding:13px 14px;border:2px solid var(--line);border-radius:14px;background:var(--card);cursor:pointer;color:var(--mut)}
+button{width:100%;margin-top:14px;padding:16px;border:0;border-radius:16px;background:var(--acc);color:var(--on);font:700 1.1rem inherit;font-family:inherit;cursor:pointer}
+#go{margin-top:26px}button:disabled{opacity:.45}button.sec{background:var(--card);color:var(--acc);border:2px solid var(--acc)}
+:focus-visible{outline:3px solid var(--acc);outline-offset:3px}
+#st{margin-top:22px;font-weight:600}.err{color:#D1344A}
+video.res{width:100%;border-radius:20px;margin-top:18px;background:#000}
+#why{color:var(--mut);font-size:.95rem}
+</style>
+</head>
+<body>
+<h1>Montage IA</h1>
+<label class="drop" id="drop" for="f"><div><b id="dt">Choisir les rushs</b><span id="ds">Depuis ta pellicule, plusieurs possibles</span></div></label>
+<input id="f" type="file" accept="video/*" multiple>
+
+<fieldset><legend>Qualité</legend><div class="seg">
+<input type="radio" name="res" id="r1" value="1080" checked><label for="r1">1080p · 16 Mbit/s</label>
+<input type="radio" name="res" id="r2" value="4k"><label for="r2">4K · 50 Mbit/s</label></div></fieldset>
+
+<fieldset><label class="t" for="style">Style du montage</label>
+<input id="style" type="text" value="dynamique" placeholder="dynamique, calme, humoristique…"></fieldset>
+
+<fieldset><span class="t">Musique d’ambiance (facultatif)</span>
+<label class="pick" id="mp" for="m">Choisir un fichier audio libre de droits</label><input id="m" type="file" accept="audio/*"></fieldset>
+
+<label class="chk"><input type="checkbox" id="subs" checked> Sous-titres incrustés</label>
+
+<button id="go" disabled>Analyser les rushs</button>
+<div id="st" role="status"></div>
+<div id="out"></div>
+
+<script type="module">
+const $=id=>document.getElementById(id);
+const st=(m,e)=>{$('st').textContent=m;$('st').className=e?'err':''};
+let files=[],music=null,wl=null;
+$('f').onchange=()=>{files=[...$('f').files];const n=files.length,mb=files.reduce((a,f)=>a+f.size,0)/1048576;
+ $('dt').textContent=n?`${n} rush${n>1?'s':''} sélectionné${n>1?'s':''}`:'Choisir les rushs';
+ $('ds').textContent=n?`${mb.toFixed(0)} Mo · toucher pour changer`:'Depuis ta pellicule, plusieurs possibles';
+ $('drop').classList.toggle('has',!!n);$('go').disabled=!n};
+$('m').onchange=()=>{music=$('m').files[0]||null;$('mp').textContent=music?music.name:'Choisir un fichier audio libre de droits'};
+
+$('go').onclick=async()=>{
+ $('go').disabled=true;$('out').innerHTML='';
+ try{wl=await navigator.wakeLock?.request('screen')}catch{}
+ try{
+  const phr=await transcribe();
+  let idx;
+  try{idx=await askLLM(phr,$('style').value)}catch(e){console.warn(e);st('IA indisponible : montage automatique simple.')}
+  const plan=pick(phr,idx&&idx.length?idx:phr.map((_,i)=>i));
+  if(!plan.length)throw new Error('Aucune parole détectée dans les rushs.');
+  const total=plan.reduce((a,p)=>a+p.e-p.s,0);
+  st(`Plan prêt : ${plan.length} passages, ${Math.round(total)} s. L’export se fait en temps réel : laisse l’écran allumé.`);
+  $('out').innerHTML='<button id="ex">Exporter la vidéo</button>';
+  $('ex').onclick=async()=>{$('ex').disabled=true;try{await render(plan)}catch(e){st('Erreur : '+(e.message||e),1)}finally{wl?.release();$('go').disabled=false}};
+ }catch(e){st('Erreur : '+(e.message||e),1);$('go').disabled=false;wl?.release()}
+};
+
+async function transcribe(){
+ const {pipeline}=await import('https://cdn.jsdelivr.net/npm/@huggingface/transformers@3.5.1/+esm');
+ const asr=await pipeline('automatic-speech-recognition','onnx-community/whisper-base',{device:'webgpu',dtype:{encoder_model:'fp32',decoder_model_merged:'q4'},
+  progress_callback:p=>{if(p.status==='progress')st(`Téléchargement de la transcription : ${Math.round(p.progress)} %`)}});
+ const phr=[];
+ for(const [r,f] of files.entries()){
+  st(`Transcription du rush ${r+1}/${files.length}…`);
+  const ctx=new AudioContext({sampleRate:16000});
+  const a=await ctx.decodeAudioData(await f.arrayBuffer());ctx.close();
+  const out=await asr(a.getChannelData(0),{language:'french',task:'transcribe',return_timestamps:true,chunk_length_s:30,stride_length_s:5});
+  for(const c of out.chunks){const [s,e]=c.timestamp,t=c.text.trim();if(t&&(e??s+3)-s>=0.6)phr.push({r,s,e:e??s+3,text:t})}
+ }
+ await asr.dispose?.();
+ return phr;
+}
+
+async function askLLM(phr,style){
+ const {CreateMLCEngine}=await import('https://cdn.jsdelivr.net/npm/@mlc-ai/web-llm@0.2.79/+esm');
+ const eng=await CreateMLCEngine('Qwen2.5-1.5B-Instruct-q4f16_1-MLC',{initProgressCallback:r=>st(`Chargement de l’IA : ${Math.round(r.progress*100)} %`)});
+ st('L’IA prépare le montage…');
+ const list=phr.slice(0,80).map((p,i)=>`${i}: ${p.text}`).join('\n');
+ const r=await eng.chat.completions.create({temperature:0.3,max_tokens:200,messages:[
+  {role:'system',content:'Tu es monteur de vidéos TikTok. Réponds uniquement en JSON.'},
+  {role:'user',content:`Phrases :\n${list}\n\nStyle : ${style}. Choisis 5 à 15 phrases pour une vidéo de 20 à 60 s : la meilleure accroche en premier, sans répétition ni hésitation. Réponds : {"garder":[numéros dans l’ordre du montage]}`}]});
+ const j=JSON.parse(r.choices[0].message.content.match(/\{[\s\S]*\}/)[0]);
+ await eng.unload?.();
+ return j.garder;
+}
+
+function pick(phr,idx){let t=0;const out=[];for(const i of new Set(idx)){const p=phr[i];if(!p)continue;if(t+p.e-p.s>60)break;out.push(p);t+=p.e-p.s}return out}
+
+async function render(plan){
+ const k4=document.querySelector('[name=res]:checked').value==='4k',subs=$('subs').checked;
+ const W=k4?2160:1080,H=k4?3840:1920;
+ const cv=document.createElement('canvas');cv.width=W;cv.height=H;const g=cv.getContext('2d');
+ const ac=new AudioContext();await ac.resume();
+ const dest=ac.createMediaStreamDestination(),voice=ac.createGain(),an=ac.createAnalyser();an.fftSize=512;
+ voice.connect(an);voice.connect(dest);
+ const vids=await Promise.all(files.map(f=>new Promise(res=>{const v=document.createElement('video');v.playsInline=true;v.preload='auto';v.src=URL.createObjectURL(f);
+  v.onloadedmetadata=()=>{ac.createMediaElementSource(v).connect(voice);res(v)}})));
+ let mg=null;
+ if(music){const mb=await ac.decodeAudioData(await music.arrayBuffer());const src=ac.createBufferSource();src.buffer=mb;src.loop=true;mg=ac.createGain();mg.gain.value=.3;src.connect(mg).connect(dest);src.start()}
+ const buf=new Uint8Array(an.fftSize);
+ const duck=()=>{if(!mg)return;an.getByteTimeDomainData(buf);let s=0;for(const b of buf)s+=((b-128)/128)**2;mg.gain.setTargetAtTime(Math.sqrt(s/buf.length)>.02?.07:.3,ac.currentTime,.15)};
+ const wrap=(t,max)=>{const L=[];let c='';for(const x of t.split(' ')){const n=c?c+' '+x:x;if(g.measureText(n).width>max&&c){L.push(c);c=x}else c=n}L.push(c);return L};
+ const draw=(v,p)=>{const vw=v.videoWidth,vh=v.videoHeight,sc=Math.max(W/vw,H/vh),sw=W/sc,sh=H/sc;
+  g.drawImage(v,(vw-sw)/2,(vh-sh)/2,sw,sh,0,0,W,H);
+  if(subs){g.font=`800 ${Math.round(H*.03)}px system-ui,sans-serif`;g.textAlign='center';g.lineJoin='round';g.lineWidth=H*.008;g.strokeStyle='#000';g.fillStyle='#fff';
+   const L=wrap(p.text,W*.84),lh=H*.038;L.forEach((l,i)=>{const y=H*.76+i*lh;g.strokeText(l,W/2,y);g.fillText(l,W/2,y)})}};
+ const stream=cv.captureStream(30);dest.stream.getAudioTracks().forEach(t=>stream.addTrack(t));
+ const mime=['video/mp4;codecs=avc1.640033,mp4a.40.2','video/mp4','video/webm;codecs=vp9,opus','video/webm'].find(m=>MediaRecorder.isTypeSupported(m));
+ const rec=new MediaRecorder(stream,{mimeType:mime,videoBitsPerSecond:k4?50e6:16e6,audioBitsPerSecond:256e3});
+ const chunks=[];rec.ondataavailable=e=>e.data.size&&chunks.push(e.data);
+ const stopped=new Promise(r=>rec.onstop=r);rec.start(1000);
+ for(const [i,p] of plan.entries()){
+  st(`Export : passage ${i+1}/${plan.length}`);
+  const v=vids[p.r],s=Math.max(0,p.s-.05),e=p.e+.15;
+  const sk=new Promise(r=>v.addEventListener('seeked',r,{once:true}));v.currentTime=s;await sk;await v.play();
+  await new Promise(res=>{const tick=()=>{draw(v,p);duck();if(v.currentTime>=e||v.ended){v.pause();res()}else requestAnimationFrame(tick)};tick()});
+ }
+ rec.stop();await stopped;ac.close();
+ const type=mime.split(';')[0],blob=new Blob(chunks,{type}),ext=type.includes('mp4')?'mp4':'webm',url=URL.createObjectURL(blob);
+ st('Terminé.');
+ $('out').innerHTML=`<video class="res" src="${url}" controls playsinline></video><button id="sh">Enregistrer / partager</button><button class="sec" id="dl">Télécharger</button>`;
+ const file=new File([blob],`montage.${ext}`,{type});
+ $('sh').onclick=()=>navigator.share?.({files:[file]}).catch(()=>{});
+ $('dl').onclick=()=>{const a=document.createElement('a');a.href=url;a.download=file.name;a.click()};
+}
+if('serviceWorker'in navigator)navigator.serviceWorker.register('sw.js');
+</script>
+</body>
+</html>

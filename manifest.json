@@ -1,0 +1,9 @@
+{
+  "name": "Montage IA",
+  "short_name": "Montage",
+  "start_url": "./",
+  "display": "standalone",
+  "background_color": "#EDF0F5",
+  "theme_color": "#2B4BFF",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }]
+}
